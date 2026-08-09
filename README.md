@@ -201,6 +201,16 @@ Signatures are checked over the **raw bytes** received (pass the `Buffer`/`Uint8
 straight through; `verify(request)` reads bytes too), and at most 8 signature
 candidates from the header are tried per request.
 
+### Duplicates (read this)
+
+Delivery is **at-least-once** — the sender only marks an event delivered after your
+2xx, so a crash or DB blip between your response and that write means you'll see the
+same event again. This is inherent to webhooks (Stripe, Shopify, GitHub all document
+the same contract), and the fix is yours to apply: `webhook-id` is **stable across
+every retry** of an event. Dedupe on it — unique-insert the id and skip on conflict —
+and processing becomes effectively exactly-once. Ordering is also not guaranteed;
+don't assume event N arrives before N+1.
+
 Secret format: `whsec_<base64>` secrets are base64-decoded (Standard Webhooks);
 anything else is used as raw UTF-8 bytes. A `whsec_` secret whose payload is empty or
 not valid base64 is rejected (verifier throws at construction, sender's `send()`
