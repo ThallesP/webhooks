@@ -26,42 +26,41 @@ const events = {
 const wh = webhooks({
   events,
   // usually a resolver — look subscribers up per event (a static
-  // Endpoint[] also works for single-endpoint/internal setups)
-  endpoints: async ({ type, subject }) =>
+  // Subscriber[] also works for single-endpoint/internal setups)
+  subscribers: async ({ event, subject }) =>
     db.select({ url: subs.url, secret: subs.secret })
       .from(subs)
-      .where(and(eq(subs.subject, subject), arrayContains(subs.events, [type]))),
-  signing: { secret: process.env.WEBHOOK_SECRET! }, // per-endpoint `secret` overrides
+      .where(and(eq(subs.subject, subject), arrayContains(subs.events, [event]))),
+  signing: { secret: process.env.WEBHOOK_SECRET! }, // per-subscriber `secret` overrides
   delivery: direct({ maxAttempts: 5 }),             // default when omitted
 });
 
 const result = await wh.send({
-  type: "invoice.paid",                    // narrows data — correlated at the type level
+  event: "invoice.paid",                   // narrows data — correlated at the type level
   subject: "acct_42",                      // what the event is about (user/account/row id)
   data: { invoiceId: "inv_1", amountCents: 4200 },
 });
 if (!result.ok) console.error(result.error);
 // err covers: schema validation, unknown event type, non-JSON-serializable
-// payload, endpoint resolver failure, missing signing secret, missing subject
-// (when required). Per-endpoint HTTP outcomes are inside result.value.endpoints.
+// payload, subscriber resolver failure, missing signing secret, missing
+// subject. Per-subscriber HTTP outcomes are inside result.value.deliveries.
 ```
 
 ### Subject
 
 `subject` ties an event to a domain entity, in your vocabulary (`user_123`,
-`acct_9`, a row id). It flows everywhere: typed into the endpoint resolver (no
+`acct_9`, a row id). It flows everywhere: typed into the subscriber resolver (no
 digging through payloads to scope multi-tenant lookups), stored on the outbox row
 (indexable — "all deliveries for acct_42" is one query), and sent inside the signed
 body so consumers can trust it.
 
-Optional by default. `subject: "required"` in the config makes it mandatory — at the
-type level, a subjectless `send()` refuses to compile:
+**Required by default** — a subjectless `send()` refuses to compile. Single-tenant or
+internal setups where there's genuinely no subject can relax it:
 
 ```ts
-const wh = webhooks({ events, endpoints, signing, subject: "required" });
+const wh = webhooks({ events, subscribers, signing, subject: "optional" });
 
-await wh.send({ type: "invoice.paid", subject: "acct_42", data });
-await wh.send({ type: "invoice.paid", data }); // compile error: subject missing
+await wh.send({ event: "invoice.paid", data }); // fine with subject: "optional"
 ```
 
 Direct mode delivers inline from `send()` and retries in-process with backoff.
@@ -78,7 +77,7 @@ import { webhooks, outbox } from "@webhooks/sdk";
 
 const wh = webhooks({
   events,
-  endpoints: [{ url: "https://consumer.example/hook" }],
+  subscribers: (event) => lookupSubscribers(event),
   signing: { secret: process.env.WEBHOOK_SECRET! },
   delivery: outbox(myAdapter, { maxAttempts: 20 }),
 });
@@ -87,7 +86,7 @@ const wh = webhooks({
 await db.transaction(async (tx) => {
   await tx.insert(invoices).values(row);
   await wh.with(tx).send({
-    type: "invoice.paid",
+    event: "invoice.paid",
     subject: `acct_${row.accountId}`,
     data: { invoiceId: row.id, amountCents: row.total },
   });
@@ -127,7 +126,7 @@ A `memoryAdapter()` ships for tests/dev. Postgres table sketch:
 create table webhook_outbox (
   id text primary key,
   event_id text not null,
-  type text not null,
+  event_type text not null,
   subject text, -- "all deliveries for acct_42" / dead-letter triage per tenant
   body text not null,
   url text not null,
@@ -175,7 +174,7 @@ const verifier = createVerifier(process.env.WEBHOOK_SECRET!);
 export async function POST(req: Request) {
   const result = await verifier.verify(req);
   if (!result.ok) return new Response(result.reason, { status: 400 });
-  result.event; // parsed JSON body
+  result.payload; // parsed JSON body
   return new Response(null, { status: 204 });
 }
 ```
@@ -222,10 +221,10 @@ import type { Events } from "acme-sdk";
 
 const result = await verifier.verify<Events>(req);
 if (result.ok) {
-  result.event.subject; // string | null — authenticated, it's inside the signed body
-  switch (result.event.type) {
+  result.payload.subject; // string | null — authenticated, it's inside the signed body
+  switch (result.payload.event) {
     case "invoice.paid":
-      result.event.data.amountCents; // typed
+      result.payload.data.amountCents; // typed
   }
 }
 ```
@@ -233,7 +232,7 @@ if (result.ok) {
 `EventUnion` gives **wire** types — the payload after its JSON round-trip — so a
 `z.date()` field is typed `string` on the consumer side, and a `z.bigint()` field
 types as `never` (it can't be sent; `send()` returns an err for it). Note the verifier
-proves *who sent* the payload, not its shape: `result.event` is parsed JSON typed as
+proves *who sent* the payload, not its shape: `result.payload` is parsed JSON typed as
 `T` by assertion. If the signing secret is shared with parties you don't fully trust,
 validate the shape with your own schema before using it.
 

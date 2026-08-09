@@ -9,7 +9,8 @@ const events = {
 function makeWh(adapter = memoryAdapter(), opts: Parameters<typeof outbox>[1] = {}) {
   return webhooks({
     events,
-    endpoints: [{ url: "https://consumer.test/hook" }],
+    subscribers: [{ url: "https://consumer.test/hook" }],
+    subject: "optional",
     signing: { secret: "s3cret" },
     delivery: outbox(adapter, { backoffMs: () => 0, ...opts }),
   });
@@ -23,14 +24,14 @@ describe("outbox delivery", () => {
     const adapter = memoryAdapter();
     const wh = makeWh(adapter);
 
-    const result = await wh.send({ type: "user.created", data: { userId: "u_1" } });
+    const result = await wh.send({ event: "user.created", data: { userId: "u_1" } });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.enqueued).toBe(1);
     expect(adapter.rows.length).toBe(1);
     expect(adapter.rows[0]).toMatchObject({
       eventId: result.value.eventId,
-      type: "user.created",
+      eventType: "user.created",
       status: "pending",
       attempts: 0,
       url: "https://consumer.test/hook",
@@ -41,8 +42,8 @@ describe("outbox delivery", () => {
     const adapter = memoryAdapter();
     const wh = makeWh(adapter);
 
-    await wh.send({ type: "user.created", subject: "user_9", data: { userId: "u_9" } });
-    await wh.send({ type: "user.created", data: { userId: "u_10" } });
+    await wh.send({ event: "user.created", subject: "user_9", data: { userId: "u_9" } });
+    await wh.send({ event: "user.created", data: { userId: "u_10" } });
 
     expect(adapter.rows[0]).toMatchObject({ subject: "user_9" });
     expect(adapter.rows[1]).toMatchObject({ subject: null });
@@ -53,7 +54,7 @@ describe("outbox delivery", () => {
     const wh = makeWh(adapter);
     const tx = { fake: "tx" };
 
-    const result = await wh.with(tx).send({ type: "user.created", data: { userId: "u_2" } });
+    const result = await wh.with(tx).send({ event: "user.created", data: { userId: "u_2" } });
     expect(result.ok).toBe(true);
     expect(adapter.lastTx).toBe(tx);
   });
@@ -61,7 +62,7 @@ describe("outbox delivery", () => {
   test("worker tick delivers pending rows", async () => {
     const adapter = memoryAdapter();
     const wh = makeWh(adapter);
-    await wh.send({ type: "user.created", data: { userId: "u_3" } });
+    await wh.send({ event: "user.created", data: { userId: "u_3" } });
 
     const report = await wh.worker({ fetchImpl: stubFetch(200) }).tick();
 
@@ -72,7 +73,7 @@ describe("outbox delivery", () => {
   test("failed delivery schedules a retry, then dead-letters at maxAttempts", async () => {
     const adapter = memoryAdapter();
     const wh = makeWh(adapter, { maxAttempts: 2 });
-    await wh.send({ type: "user.created", data: { userId: "u_4" } });
+    await wh.send({ event: "user.created", data: { userId: "u_4" } });
 
     const worker = wh.worker({ fetchImpl: stubFetch(500) });
 
@@ -98,7 +99,7 @@ describe("outbox delivery", () => {
   test("worker signs deliveries the same way as direct mode", async () => {
     const adapter = memoryAdapter();
     const wh = makeWh(adapter);
-    await wh.send({ type: "user.created", data: { userId: "u_5" } });
+    await wh.send({ event: "user.created", data: { userId: "u_5" } });
 
     let captured: { body: string; headers: Headers } | null = null;
     const fetchImpl = (async (_url: URL | Request | string, init?: RequestInit) => {
@@ -127,8 +128,8 @@ describe("outbox delivery", () => {
       },
     };
     const wh = makeWh(failing as typeof inner);
-    await wh.send({ type: "user.created", data: { userId: "u_a" } });
-    await wh.send({ type: "user.created", data: { userId: "u_b" } });
+    await wh.send({ event: "user.created", data: { userId: "u_a" } });
+    await wh.send({ event: "user.created", data: { userId: "u_b" } });
 
     const errors: unknown[] = [];
     const report = await wh
@@ -193,7 +194,7 @@ describe("outbox delivery", () => {
   test("start/stop polling loop delivers in the background", async () => {
     const adapter = memoryAdapter();
     const wh = makeWh(adapter);
-    await wh.send({ type: "user.created", data: { userId: "u_6" } });
+    await wh.send({ event: "user.created", data: { userId: "u_6" } });
 
     const worker = wh.worker({ fetchImpl: stubFetch(200), pollIntervalMs: 5 });
     worker.start();

@@ -26,18 +26,19 @@ describe("direct delivery", () => {
     const { calls, fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook" }],
       signing: { secret: "whsec_dGVzdC1zZWNyZXQ=" },
       delivery: direct({ fetchImpl }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       data: { invoiceId: "inv_1", amountCents: 4200 },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.endpoints).toEqual([
+    expect(result.value.deliveries).toEqual([
       { url: "https://consumer.test/hook", delivered: true, attempts: 1, status: 200 },
     ]);
 
@@ -48,8 +49,8 @@ describe("direct delivery", () => {
     const verified = await verifier.verifyPayload(call.body, call.headers);
     expect(verified.ok).toBe(true);
     if (!verified.ok) return;
-    expect(verified.event).toEqual({
-      type: "invoice.paid",
+    expect(verified.payload).toEqual({
+      event: "invoice.paid",
       subject: null,
       data: { invoiceId: "inv_1", amountCents: 4200 },
     });
@@ -60,12 +61,13 @@ describe("direct delivery", () => {
     const { calls, fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
       delivery: direct({ fetchImpl }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       subject: "acct_42",
       data: { invoiceId: "inv_sub", amountCents: 1 },
     });
@@ -77,24 +79,23 @@ describe("direct delivery", () => {
     );
     expect(verified.ok).toBe(true);
     if (!verified.ok) return;
-    expect(verified.event).toMatchObject({ subject: "acct_42" });
+    expect(verified.payload).toMatchObject({ subject: "acct_42" });
   });
 
-  test("subject: 'required' config rejects subjectless sends at runtime (JS backstop)", async () => {
+  test("subject is required by default — subjectless sends rejected at runtime (JS backstop)", async () => {
     const { calls, fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
-      subject: "required",
+      subscribers: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
       delivery: direct({ fetchImpl }),
     });
 
     const send = wh.send as unknown as (input: {
-      type: string;
+      event: string;
       data: unknown;
     }) => Promise<{ ok: boolean }>;
     const result = await send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       data: { invoiceId: "inv_ns", amountCents: 1 },
     });
     expect(result.ok).toBe(false);
@@ -105,12 +106,13 @@ describe("direct delivery", () => {
     const { fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
       delivery: direct({ fetchImpl }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       subject: "",
       data: { invoiceId: "inv_es", amountCents: 1 },
     });
@@ -121,17 +123,18 @@ describe("direct delivery", () => {
     const { calls, fetchImpl } = captureFetch([500, 500, 200]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
       delivery: direct({ fetchImpl, backoffMs: () => 0 }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       data: { invoiceId: "inv_2", amountCents: 1 },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.endpoints[0]).toMatchObject({ delivered: true, attempts: 3 });
+    expect(result.value.deliveries[0]).toMatchObject({ delivered: true, attempts: 3 });
     expect(calls.length).toBe(3);
   });
 
@@ -139,17 +142,18 @@ describe("direct delivery", () => {
     const { calls, fetchImpl } = captureFetch([500]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
       delivery: direct({ fetchImpl, backoffMs: () => 0, maxAttempts: 3 }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       data: { invoiceId: "inv_3", amountCents: 1 },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.endpoints[0]).toMatchObject({
+    expect(result.value.deliveries[0]).toMatchObject({
       delivered: false,
       attempts: 3,
       error: "endpoint responded 500",
@@ -161,12 +165,13 @@ describe("direct delivery", () => {
     const { calls, fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
       delivery: direct({ fetchImpl }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       data: { invoiceId: "inv_4", amountCents: "not-a-number" as unknown as number },
     });
     expect(result.ok).toBe(false);
@@ -177,12 +182,13 @@ describe("direct delivery", () => {
     const { fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook" }],
       delivery: direct({ fetchImpl }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       data: { invoiceId: "inv_5", amountCents: 1 },
     });
     expect(result.ok).toBe(false);
@@ -194,17 +200,18 @@ describe("direct delivery", () => {
     const { calls, fetchImpl } = captureFetch([302]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
       delivery: direct({ fetchImpl, backoffMs: () => 0, maxAttempts: 2 }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       data: { invoiceId: "inv_r", amountCents: 1 },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.endpoints[0]).toMatchObject({
+    expect(result.value.deliveries[0]).toMatchObject({
       delivered: false,
       error: "endpoint responded 302",
     });
@@ -215,11 +222,12 @@ describe("direct delivery", () => {
     const { calls, fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events: { "big.event": z.object({ n: z.bigint() }) },
-      endpoints: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
       delivery: direct({ fetchImpl }),
     });
 
-    const result = await wh.send({ type: "big.event", data: { n: 10n } });
+    const result = await wh.send({ event: "big.event", data: { n: 10n } });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain("not JSON-serializable");
@@ -230,13 +238,14 @@ describe("direct delivery", () => {
     const { fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
       delivery: direct({ fetchImpl }),
     });
 
-    const send = wh.send as (input: { type: string; data: unknown }) => Promise<{ ok: boolean }>;
+    const send = wh.send as (input: { event: string; data: unknown }) => Promise<{ ok: boolean }>;
     for (const name of ["toString", "constructor", "valueOf"]) {
-      const result = await send({ type: name, data: {} });
+      const result = await send({ event: name, data: {} });
       expect(result.ok).toBe(false);
     }
   });
@@ -245,19 +254,20 @@ describe("direct delivery", () => {
     const { fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events,
-      endpoints: () => {
+      subject: "optional",
+      subscribers: () => {
         throw new Error("sync boom");
       },
       delivery: direct({ fetchImpl }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       data: { invoiceId: "inv_s", amountCents: 1 },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toContain("endpoint resolver failed");
+    expect(result.error).toContain("subscriber resolver failed");
   });
 
   test("returns err when a schema transform throws instead of rejecting send()", async () => {
@@ -268,11 +278,12 @@ describe("direct delivery", () => {
           throw new Error("transform blew up");
         }),
       },
-      endpoints: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook", secret: "s3cret" }],
       delivery: direct({ fetchImpl }),
     });
 
-    const result = await wh.send({ type: "boom.event", data: { x: "1" } });
+    const result = await wh.send({ event: "boom.event", data: { x: "1" } });
     expect(result.ok).toBe(false);
     expect(calls.length).toBe(0);
   });
@@ -281,13 +292,14 @@ describe("direct delivery", () => {
     const { calls, fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events,
-      endpoints: [{ url: "https://consumer.test/hook" }],
+      subject: "optional",
+      subscribers: [{ url: "https://consumer.test/hook" }],
       signing: { secret: "whsec_" },
       delivery: direct({ fetchImpl }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       data: { invoiceId: "inv_w", amountCents: 1 },
     });
     expect(result.ok).toBe(false);
@@ -300,38 +312,40 @@ describe("direct delivery", () => {
     const { fetchImpl } = captureFetch([200]);
     const wh = webhooks({
       events,
-      endpoints: () => Promise.reject(new Error("subscriber db down")),
+      subject: "optional",
+      subscribers: () => Promise.reject(new Error("subscriber db down")),
       delivery: direct({ fetchImpl }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       data: { invoiceId: "inv_e", amountCents: 1 },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toContain("endpoint resolver failed");
+    expect(result.error).toContain("subscriber resolver failed");
   });
 
-  test("resolver receives type and subject", async () => {
+  test("resolver receives event and subject", async () => {
     const { calls, fetchImpl } = captureFetch([200]);
-    const seen: { type: string; subject: string | null }[] = [];
+    const seen: { event: string; subject: string | null }[] = [];
     const wh = webhooks({
       events,
-      endpoints: (event) => {
-        seen.push({ type: event.type, subject: event.subject });
-        return [{ url: `https://consumer.test/${event.type}`, secret: "s3cret" }];
+      subject: "optional",
+      subscribers: (event) => {
+        seen.push({ event: event.event, subject: event.subject });
+        return [{ url: `https://consumer.test/${event.event}`, secret: "s3cret" }];
       },
       delivery: direct({ fetchImpl }),
     });
 
     const result = await wh.send({
-      type: "invoice.paid",
+      event: "invoice.paid",
       subject: "acct_7",
       data: { invoiceId: "inv_6", amountCents: 1 },
     });
     expect(result.ok).toBe(true);
     expect(calls[0]!.url).toBe("https://consumer.test/invoice.paid");
-    expect(seen).toEqual([{ type: "invoice.paid", subject: "acct_7" }]);
+    expect(seen).toEqual([{ event: "invoice.paid", subject: "acct_7" }]);
   });
 });

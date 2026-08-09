@@ -1,7 +1,7 @@
 export interface OutboxRow {
   id: string;
   eventId: string;
-  type: string;
+  eventType: string;
   /** What the event is about (user, account, row — caller's vocabulary). */
   subject: string | null;
   /** Pre-serialized JSON body — signed and sent verbatim at delivery time. */

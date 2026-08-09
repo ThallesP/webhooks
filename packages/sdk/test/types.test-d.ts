@@ -1,7 +1,7 @@
 /**
  * Compile-time API contract. Checked by `tsc --noEmit`, never executed.
  * The load-bearing claims: outbox-only members don't exist in direct mode,
- * and subject: "required" makes subjectless sends refuse to compile.
+ * and subject is required by default (subject: "optional" relaxes it).
  */
 import { z } from "zod";
 import {
@@ -19,24 +19,38 @@ const events = {
   "user.created": z.object({ userId: z.string() }),
 };
 
-export async function directMode() {
+export async function subjectRequiredByDefault() {
   const wh = webhooks({
     events,
-    endpoints: [],
+    subscribers: [],
     signing: { secret: "s" },
   });
 
-  await wh.send({ type: "invoice.paid", data: { invoiceId: "inv_1" } });
-  await wh.send({ type: "invoice.paid", subject: "acct_1", data: { invoiceId: "inv_1" } });
+  await wh.send({ event: "invoice.paid", subject: "acct_1", data: { invoiceId: "inv_1" } });
+
+  // @ts-expect-error subject is required unless the config says subject: "optional"
+  await wh.send({ event: "invoice.paid", data: { invoiceId: "inv_1" } });
+}
+
+export async function optionalSubjectMode() {
+  const wh = webhooks({
+    events,
+    subscribers: [],
+    signing: { secret: "s" },
+    subject: "optional",
+  });
+
+  await wh.send({ event: "invoice.paid", data: { invoiceId: "inv_1" } });
+  await wh.send({ event: "invoice.paid", subject: "acct_1", data: { invoiceId: "inv_1" } });
 
   // @ts-expect-error unknown event type
-  await wh.send({ type: "nope", data: { invoiceId: "inv_1" } });
+  await wh.send({ event: "nope", data: { invoiceId: "inv_1" } });
 
   // @ts-expect-error wrong payload shape
-  await wh.send({ type: "invoice.paid", data: { invoiceId: 42 } });
+  await wh.send({ event: "invoice.paid", data: { invoiceId: 42 } });
 
-  // @ts-expect-error type and data must correlate — user.created payload with invoice.paid type
-  await wh.send({ type: "invoice.paid", data: { userId: "u_1" } });
+  // @ts-expect-error event and data must correlate — user.created payload with invoice.paid event
+  await wh.send({ event: "invoice.paid", data: { userId: "u_1" } });
 
   // @ts-expect-error worker() exists only with outbox delivery
   wh.worker;
@@ -48,7 +62,7 @@ export async function directMode() {
 export async function explicitDirectMode() {
   const wh = webhooks({
     events,
-    endpoints: [],
+    subscribers: [],
     signing: { secret: "s" },
     delivery: direct(),
   });
@@ -57,49 +71,35 @@ export async function explicitDirectMode() {
   wh.worker;
 }
 
-export async function requiredSubjectMode() {
-  const wh = webhooks({
-    events,
-    endpoints: [],
-    signing: { secret: "s" },
-    subject: "required",
-  });
-
-  await wh.send({ type: "invoice.paid", subject: "acct_1", data: { invoiceId: "inv_1" } });
-
-  // @ts-expect-error subject is required by this config
-  await wh.send({ type: "invoice.paid", data: { invoiceId: "inv_1" } });
-}
-
 export async function outboxMode() {
   const wh = webhooks({
     events,
-    endpoints: [],
+    subscribers: [],
     signing: { secret: "s" },
+    subject: "optional",
     delivery: outbox(memoryAdapter()),
   });
 
   wh.worker();
-  await wh.send({ type: "invoice.paid", data: { invoiceId: "inv_1" } });
-  await wh.with({ tx: true }).send({ type: "invoice.paid", data: { invoiceId: "inv_1" } });
+  await wh.send({ event: "invoice.paid", data: { invoiceId: "inv_1" } });
+  await wh.with({ tx: true }).send({ event: "invoice.paid", data: { invoiceId: "inv_1" } });
 
   // @ts-expect-error unknown event type, even through with(tx)
-  await wh.with({}).send({ type: "nope", data: {} });
+  await wh.with({}).send({ event: "nope", data: {} });
 }
 
-export async function outboxRequiredSubjectMode() {
+export async function outboxSubjectRequired() {
   const wh = webhooks({
     events,
-    endpoints: [],
+    subscribers: [],
     signing: { secret: "s" },
-    subject: "required",
     delivery: outbox(memoryAdapter()),
   });
 
-  await wh.with({}).send({ type: "user.created", subject: "user_1", data: { userId: "u" } });
+  await wh.with({}).send({ event: "user.created", subject: "user_1", data: { userId: "u" } });
 
   // @ts-expect-error subject required through with(tx) too
-  await wh.with({}).send({ type: "user.created", data: { userId: "u" } });
+  await wh.with({}).send({ event: "user.created", data: { userId: "u" } });
 }
 
 export function noOutboxTypeWithoutDelivery() {
@@ -108,7 +108,7 @@ export function noOutboxTypeWithoutDelivery() {
   // @ts-expect-error outbox-typed instance requires delivery: outbox(...)
   const bad: OutboxWebhooks<typeof events, unknown> = webhooks({
     events,
-    endpoints: [],
+    subscribers: [],
     signing: { secret: "s" },
   });
   return bad;
@@ -126,7 +126,7 @@ export function eventUnionReflectsJsonWire() {
   const dateEvents = {
     "thing.happened": z.object({ at: z.date() }),
   };
-  type Wire = Extract<EventUnion<typeof dateEvents>, { type: "thing.happened" }>;
+  type Wire = Extract<EventUnion<typeof dateEvents>, { event: "thing.happened" }>;
 
   const wireIsString: Wire["data"]["at"] = "2026-01-01T00:00:00.000Z";
   // @ts-expect-error Date does not survive the JSON round-trip — wire type is string

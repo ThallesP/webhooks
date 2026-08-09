@@ -1,9 +1,9 @@
 import {
-  type Endpoint,
-  type EndpointResolver,
   type EventMap,
   type Result,
   type StandardSchemaV1,
+  type Subscriber,
+  type SubscriberResolver,
   err,
   ok,
   toResult,
@@ -14,13 +14,13 @@ import type { OutboxAdapter, OutboxRow } from "./outbox";
 import { type OutboxWorker, type WorkerOpts, createWorker } from "./worker";
 
 export type {
-  Endpoint,
-  EndpointResolver,
   EventMap,
   EventUnion,
   Jsonify,
   Result,
   StandardSchemaV1,
+  Subscriber,
+  SubscriberResolver,
 } from "./types";
 export { ok, err } from "./types";
 export { isValidSecret, signPayload } from "./signing";
@@ -97,11 +97,12 @@ export function outbox<Tx>(
 
 export interface WebhooksConfig<E extends EventMap> {
   events: E;
-  endpoints: Endpoint[] | EndpointResolver;
-  /** Default signing secret for endpoints that don't carry their own. */
+  /** Who receives events — a resolver (usually a DB lookup) or a static list. */
+  subscribers: Subscriber[] | SubscriberResolver;
+  /** Default signing secret for subscribers that don't carry their own. */
   signing?: { secret: string };
-  /** "required" makes `subject` mandatory in send() — at the type level. */
-  subject?: "required";
+  /** Subject is mandatory by default; "optional" relaxes it (single-tenant setups). */
+  subject?: "optional";
 }
 
 export interface DeliveryOutcome {
@@ -114,7 +115,7 @@ export interface DeliveryOutcome {
 
 export interface DirectSendReport {
   eventId: string;
-  endpoints: DeliveryOutcome[];
+  deliveries: DeliveryOutcome[];
 }
 
 export interface EnqueueReport {
@@ -122,21 +123,22 @@ export interface EnqueueReport {
   enqueued: number;
 }
 
-export type SubjectMode = "required" | undefined;
+export type SubjectMode = "optional" | undefined;
 
 /**
- * One object per send. `type` narrows `data` (correlated even when the caller
+ * One object per send. `event` narrows `data` (correlated even when the caller
  * holds a union of event names); `subject` is what the event is about — user,
- * account, row id — in the caller's vocabulary.
+ * account, row id — in the caller's vocabulary. Mandatory unless the config
+ * says subject: "optional".
  */
 export type SendInput<
   E extends EventMap,
   K extends keyof E & string,
   S extends SubjectMode,
 > = {
-  type: K;
+  event: K;
   data: StandardSchemaV1.InferInput<E[K]>;
-} & (S extends "required" ? { subject: string } : { subject?: string });
+} & (S extends "optional" ? { subject?: string } : { subject: string });
 
 export interface DirectWebhooks<E extends EventMap, S extends SubjectMode = undefined> {
   send<K extends keyof E & string>(
@@ -166,8 +168,8 @@ export interface OutboxWebhooks<
 // the outbox API. With a single generic signature and `delivery?: D`, callers
 // could annotate D = OutboxDelivery<Tx>, omit delivery, and receive an
 // outbox-typed instance whose runtime is direct — worker() would crash.
-// S rides along: `subject: "required"` in the config flips send()'s input to
-// demand a subject at compile time.
+// S rides along: subject is demanded at compile time unless the config says
+// subject: "optional".
 export function webhooks<E extends EventMap, S extends SubjectMode = undefined>(
   config: WebhooksConfig<E> & { subject?: S; delivery?: DirectDelivery },
 ): DirectWebhooks<E, S>;
@@ -206,7 +208,7 @@ export function webhooks<E extends EventMap>(
 }
 
 interface RawSendInput {
-  type: string;
+  event: string;
   subject?: string;
   data: unknown;
 }
@@ -231,11 +233,11 @@ async function prepare<E extends EventMap>(
   config: WebhooksConfig<E>,
   input: RawSendInput,
 ): Promise<Result<Prepared>> {
-  const { type, data } = input;
+  const { event, data } = input;
   const subject = input.subject ?? null;
   // The type system enforces this for TS callers; this is the JS backstop.
-  if (config.subject === "required" && subject === null) {
-    return err(`event "${type}" requires a subject`);
+  if (config.subject !== "optional" && subject === null) {
+    return err(`event "${event}" requires a subject`);
   }
   if (subject !== null && subject.length === 0) {
     return err("subject must be a non-empty string");
@@ -243,44 +245,44 @@ async function prepare<E extends EventMap>(
 
   // Own-property lookup: `config.events["toString"]` must not resolve to
   // Object.prototype members and then explode on `["~standard"]`.
-  const schema = Object.hasOwn(config.events, type) ? config.events[type] : undefined;
-  if (!schema) return err(`unknown event type "${type}"`);
+  const schema = Object.hasOwn(config.events, event) ? config.events[event] : undefined;
+  if (!schema) return err(`unknown event type "${event}"`);
 
   // toResult also contains cross-realm thenables from the validator.
   const validation = await toResult(
     () => schema["~standard"].validate(data),
-    (cause) => `schema validation threw for "${type}": ${String(cause)}`,
+    (cause) => `schema validation threw for "${event}": ${String(cause)}`,
   );
   if (!validation.ok) return validation;
   const outcome = validation.value;
   if (outcome.issues) {
     const detail = outcome.issues.map((issue) => issue.message).join("; ");
-    return err(`invalid payload for "${type}": ${detail}`);
+    return err(`invalid payload for "${event}": ${detail}`);
   }
 
-  const body = safeStringify({ type, subject, data: outcome.value });
-  if (!body.ok) return err(`payload for "${type}" is not JSON-serializable: ${body.error}`);
+  const body = safeStringify({ event, subject, data: outcome.value });
+  if (!body.ok) return err(`payload for "${event}" is not JSON-serializable: ${body.error}`);
   const eventId = `evt_${crypto.randomUUID()}`;
 
-  const endpoints = config.endpoints;
-  const resolved = Array.isArray(endpoints)
-    ? ok(endpoints)
+  const subscribers = config.subscribers;
+  const resolved = Array.isArray(subscribers)
+    ? ok(subscribers)
     : await toResult(
-        () => endpoints({ type, subject, data: outcome.value }),
-        (cause) => `endpoint resolver failed: ${String(cause)}`,
+        () => subscribers({ event, subject, data: outcome.value }),
+        (cause) => `subscriber resolver failed: ${String(cause)}`,
       );
   if (!resolved.ok) return resolved;
 
   const targets: Prepared["targets"] = [];
-  for (const endpoint of resolved.value) {
-    const secret = endpoint.secret ?? config.signing?.secret;
-    if (!secret) return err(`no signing secret for endpoint ${endpoint.url}`);
+  for (const subscriber of resolved.value) {
+    const secret = subscriber.secret ?? config.signing?.secret;
+    if (!secret) return err(`no signing secret for subscriber ${subscriber.url}`);
     if (!isValidSecret(secret)) {
       return err(
-        `invalid signing secret for endpoint ${endpoint.url}: "whsec_" secrets must contain non-empty base64`,
+        `invalid signing secret for subscriber ${subscriber.url}: "whsec_" secrets must contain non-empty base64`,
       );
     }
-    targets.push({ url: endpoint.url, secret });
+    targets.push({ url: subscriber.url, secret });
   }
   return ok({ eventId, subject, body: body.value, targets });
 }
@@ -294,7 +296,7 @@ async function sendDirect<E extends EventMap>(
   if (!prepared.ok) return prepared;
   const { eventId, body, targets } = prepared.value;
 
-  const endpoints = await Promise.all(
+  const deliveries = await Promise.all(
     targets.map(async (target): Promise<DeliveryOutcome> => {
       let lastError = "";
       for (let attempt = 1; attempt <= delivery.maxAttempts; attempt++) {
@@ -315,7 +317,7 @@ async function sendDirect<E extends EventMap>(
       return { url: target.url, delivered: false, attempts: delivery.maxAttempts, error: lastError };
     }),
   );
-  return ok({ eventId, endpoints });
+  return ok({ eventId, deliveries });
 }
 
 async function enqueue<E extends EventMap>(
@@ -332,7 +334,7 @@ async function enqueue<E extends EventMap>(
   const rows: OutboxRow[] = targets.map((target) => ({
     id: `obx_${crypto.randomUUID()}`,
     eventId,
-    type: input.type,
+    eventType: input.event,
     subject,
     body,
     url: target.url,

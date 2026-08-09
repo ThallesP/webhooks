@@ -96,20 +96,20 @@ export type Jsonify<T> = [unknown] extends [T]
  */
 export type EventUnion<E extends EventMap> = {
   [K in keyof E]: {
-    type: K & string;
+    event: K & string;
     subject: string | null;
     data: Jsonify<StandardSchemaV1.InferOutput<E[K]>>;
   };
 }[keyof E];
 
-export interface Endpoint {
+export interface Subscriber {
   url: string;
   /** Falls back to the top-level `signing.secret` when omitted. */
   secret?: string;
 }
 
-export type EndpointResolver = (event: {
-  type: string;
+export type SubscriberResolver = (event: {
+  event: string;
   subject: string | null;
   data: unknown;
-}) => Endpoint[] | Promise<Endpoint[]>;
+}) => Subscriber[] | Promise<Subscriber[]>;

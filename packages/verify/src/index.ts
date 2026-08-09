@@ -27,7 +27,7 @@ export type VerifyFailure =
   | "invalid_json";
 
 export type VerifyResult<T> =
-  | { ok: true; id: string; timestamp: Date; event: T }
+  | { ok: true; id: string; timestamp: Date; payload: T }
   | { ok: false; reason: VerifyFailure };
 
 export type HeadersLike = Headers | Record<string, string | string[] | undefined>;
@@ -134,7 +134,7 @@ export function createVerifier(
       ok: true,
       id: head.id,
       timestamp: new Date(head.timestampSec * 1000),
-      event: parsed.value as T,
+      payload: parsed.value as T,
     };
   }
 

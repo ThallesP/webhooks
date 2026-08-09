@@ -38,7 +38,7 @@ describe("createVerifier", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.id).toBe("evt_123");
-    expect(result.event).toEqual({ type: "invoice.paid", data: { invoiceId: "inv_1" } });
+    expect(result.payload).toEqual({ type: "invoice.paid", data: { invoiceId: "inv_1" } });
   });
 
   test("accepts a fetch Request", async () => {
