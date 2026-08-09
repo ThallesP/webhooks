@@ -25,16 +25,43 @@ const events = {
 
 const wh = webhooks({
   events,
-  endpoints: [{ url: "https://consumer.example/hook" }], // or (event) => Endpoint[]
-  signing: { secret: process.env.WEBHOOK_SECRET! },      // per-endpoint `secret` overrides
-  delivery: direct({ maxAttempts: 5 }),                  // default when omitted
+  // usually a resolver — look subscribers up per event (a static
+  // Endpoint[] also works for single-endpoint/internal setups)
+  endpoints: async ({ type, subject }) =>
+    db.select({ url: subs.url, secret: subs.secret })
+      .from(subs)
+      .where(and(eq(subs.subject, subject), arrayContains(subs.events, [type]))),
+  signing: { secret: process.env.WEBHOOK_SECRET! }, // per-endpoint `secret` overrides
+  delivery: direct({ maxAttempts: 5 }),             // default when omitted
 });
 
-const result = await wh.send("invoice.paid", { invoiceId: "inv_1", amountCents: 4200 });
+const result = await wh.send({
+  type: "invoice.paid",                    // narrows data — correlated at the type level
+  subject: "acct_42",                      // what the event is about (user/account/row id)
+  data: { invoiceId: "inv_1", amountCents: 4200 },
+});
 if (!result.ok) console.error(result.error);
 // err covers: schema validation, unknown event type, non-JSON-serializable
-// payload, endpoint resolver failure, missing signing secret.
-// Per-endpoint HTTP outcomes are inside result.value.endpoints.
+// payload, endpoint resolver failure, missing signing secret, missing subject
+// (when required). Per-endpoint HTTP outcomes are inside result.value.endpoints.
+```
+
+### Subject
+
+`subject` ties an event to a domain entity, in your vocabulary (`user_123`,
+`acct_9`, a row id). It flows everywhere: typed into the endpoint resolver (no
+digging through payloads to scope multi-tenant lookups), stored on the outbox row
+(indexable — "all deliveries for acct_42" is one query), and sent inside the signed
+body so consumers can trust it.
+
+Optional by default. `subject: "required"` in the config makes it mandatory — at the
+type level, a subjectless `send()` refuses to compile:
+
+```ts
+const wh = webhooks({ events, endpoints, signing, subject: "required" });
+
+await wh.send({ type: "invoice.paid", subject: "acct_42", data });
+await wh.send({ type: "invoice.paid", data }); // compile error: subject missing
 ```
 
 Direct mode delivers inline from `send()` and retries in-process with backoff.
@@ -59,7 +86,11 @@ const wh = webhooks({
 // event row commits atomically with your business data
 await db.transaction(async (tx) => {
   await tx.insert(invoices).values(row);
-  await wh.with(tx).send("invoice.paid", { invoiceId: row.id, amountCents: row.total });
+  await wh.with(tx).send({
+    type: "invoice.paid",
+    subject: `acct_${row.accountId}`,
+    data: { invoiceId: row.id, amountCents: row.total },
+  });
 });
 
 // any process — same process, a worker dyno, or drive tick() from cron
@@ -97,6 +128,7 @@ create table webhook_outbox (
   id text primary key,
   event_id text not null,
   type text not null,
+  subject text, -- "all deliveries for acct_42" / dead-letter triage per tenant
   body text not null,
   url text not null,
   secret text, -- stored as-is; encrypt or resolve at delivery time if that worries you
@@ -108,6 +140,7 @@ create table webhook_outbox (
   created_at timestamptz not null default now()
 );
 create index on webhook_outbox (status, next_attempt_at);
+create index on webhook_outbox (subject);
 ```
 
 With multiple workers, `claim` must take a **lease**, not just a lock — a plain
@@ -189,6 +222,7 @@ import type { Events } from "acme-sdk";
 
 const result = await verifier.verify<Events>(req);
 if (result.ok) {
+  result.event.subject; // string | null — authenticated, it's inside the signed body
   switch (result.event.type) {
     case "invoice.paid":
       result.event.data.amountCents; // typed

@@ -100,6 +100,8 @@ export interface WebhooksConfig<E extends EventMap> {
   endpoints: Endpoint[] | EndpointResolver;
   /** Default signing secret for endpoints that don't carry their own. */
   signing?: { secret: string };
+  /** "required" makes `subject` mandatory in send() — at the type level. */
+  subject?: "required";
 }
 
 export interface DeliveryOutcome {
@@ -120,26 +122,41 @@ export interface EnqueueReport {
   enqueued: number;
 }
 
-type SendData<E extends EventMap, K extends keyof E> = StandardSchemaV1.InferInput<E[K]>;
+export type SubjectMode = "required" | undefined;
 
-export interface DirectWebhooks<E extends EventMap> {
+/**
+ * One object per send. `type` narrows `data` (correlated even when the caller
+ * holds a union of event names); `subject` is what the event is about — user,
+ * account, row id — in the caller's vocabulary.
+ */
+export type SendInput<
+  E extends EventMap,
+  K extends keyof E & string,
+  S extends SubjectMode,
+> = {
+  type: K;
+  data: StandardSchemaV1.InferInput<E[K]>;
+} & (S extends "required" ? { subject: string } : { subject?: string });
+
+export interface DirectWebhooks<E extends EventMap, S extends SubjectMode = undefined> {
   send<K extends keyof E & string>(
-    type: K,
-    data: SendData<E, K>,
+    input: SendInput<E, K, S>,
   ): Promise<Result<DirectSendReport>>;
 }
 
-export interface OutboxWebhooks<E extends EventMap, Tx> {
+export interface OutboxWebhooks<
+  E extends EventMap,
+  Tx,
+  S extends SubjectMode = undefined,
+> {
   /** Enqueue outside a transaction — adapter uses its own connection. */
   send<K extends keyof E & string>(
-    type: K,
-    data: SendData<E, K>,
+    input: SendInput<E, K, S>,
   ): Promise<Result<EnqueueReport>>;
   /** Enqueue inside your transaction — the outbox row commits with your data. */
   with(tx: Tx): {
     send<K extends keyof E & string>(
-      type: K,
-      data: SendData<E, K>,
+      input: SendInput<E, K, S>,
     ): Promise<Result<EnqueueReport>>;
   };
   worker(opts?: WorkerOpts): OutboxWorker;
@@ -149,22 +166,24 @@ export interface OutboxWebhooks<E extends EventMap, Tx> {
 // the outbox API. With a single generic signature and `delivery?: D`, callers
 // could annotate D = OutboxDelivery<Tx>, omit delivery, and receive an
 // outbox-typed instance whose runtime is direct — worker() would crash.
-export function webhooks<E extends EventMap>(
-  config: WebhooksConfig<E> & { delivery?: DirectDelivery },
-): DirectWebhooks<E>;
-export function webhooks<E extends EventMap, Tx>(
-  config: WebhooksConfig<E> & { delivery: OutboxDelivery<Tx> },
-): OutboxWebhooks<E, Tx>;
+// S rides along: `subject: "required"` in the config flips send()'s input to
+// demand a subject at compile time.
+export function webhooks<E extends EventMap, S extends SubjectMode = undefined>(
+  config: WebhooksConfig<E> & { subject?: S; delivery?: DirectDelivery },
+): DirectWebhooks<E, S>;
+export function webhooks<E extends EventMap, Tx, S extends SubjectMode = undefined>(
+  config: WebhooksConfig<E> & { subject?: S; delivery: OutboxDelivery<Tx> },
+): OutboxWebhooks<E, Tx, S>;
 export function webhooks<E extends EventMap>(
   config: WebhooksConfig<E> & { delivery?: Delivery },
-): DirectWebhooks<E> | OutboxWebhooks<E, unknown> {
+): DirectWebhooks<E, SubjectMode> | OutboxWebhooks<E, unknown, SubjectMode> {
   const delivery: Delivery = config.delivery ?? direct();
 
   if (delivery.kind === "outbox") {
-    const api: OutboxWebhooks<E, unknown> = {
-      send: (type, data) => enqueue(config, delivery, type, data, undefined),
+    const api: OutboxWebhooks<E, unknown, SubjectMode> = {
+      send: (input) => enqueue(config, delivery, input, undefined),
       with: (tx) => ({
-        send: (type, data) => enqueue(config, delivery, type, data, tx),
+        send: (input) => enqueue(config, delivery, input, tx),
       }),
       worker: (opts) =>
         createWorker(
@@ -180,14 +199,21 @@ export function webhooks<E extends EventMap>(
     return api;
   }
 
-  const api: DirectWebhooks<E> = {
-    send: (type, data) => sendDirect(config, delivery, type, data),
+  const api: DirectWebhooks<E, SubjectMode> = {
+    send: (input) => sendDirect(config, delivery, input),
   };
   return api;
 }
 
+interface RawSendInput {
+  type: string;
+  subject?: string;
+  data: unknown;
+}
+
 interface Prepared {
   eventId: string;
+  subject: string | null;
   body: string;
   targets: { url: string; secret: string }[];
 }
@@ -203,9 +229,18 @@ function safeStringify(value: unknown): Result<string> {
 
 async function prepare<E extends EventMap>(
   config: WebhooksConfig<E>,
-  type: string,
-  data: unknown,
+  input: RawSendInput,
 ): Promise<Result<Prepared>> {
+  const { type, data } = input;
+  const subject = input.subject ?? null;
+  // The type system enforces this for TS callers; this is the JS backstop.
+  if (config.subject === "required" && subject === null) {
+    return err(`event "${type}" requires a subject`);
+  }
+  if (subject !== null && subject.length === 0) {
+    return err("subject must be a non-empty string");
+  }
+
   // Own-property lookup: `config.events["toString"]` must not resolve to
   // Object.prototype members and then explode on `["~standard"]`.
   const schema = Object.hasOwn(config.events, type) ? config.events[type] : undefined;
@@ -223,7 +258,7 @@ async function prepare<E extends EventMap>(
     return err(`invalid payload for "${type}": ${detail}`);
   }
 
-  const body = safeStringify({ type, data: outcome.value });
+  const body = safeStringify({ type, subject, data: outcome.value });
   if (!body.ok) return err(`payload for "${type}" is not JSON-serializable: ${body.error}`);
   const eventId = `evt_${crypto.randomUUID()}`;
 
@@ -231,7 +266,7 @@ async function prepare<E extends EventMap>(
   const resolved = Array.isArray(endpoints)
     ? ok(endpoints)
     : await toResult(
-        () => endpoints({ type, data: outcome.value }),
+        () => endpoints({ type, subject, data: outcome.value }),
         (cause) => `endpoint resolver failed: ${String(cause)}`,
       );
   if (!resolved.ok) return resolved;
@@ -247,16 +282,15 @@ async function prepare<E extends EventMap>(
     }
     targets.push({ url: endpoint.url, secret });
   }
-  return ok({ eventId, body: body.value, targets });
+  return ok({ eventId, subject, body: body.value, targets });
 }
 
 async function sendDirect<E extends EventMap>(
   config: WebhooksConfig<E>,
   delivery: DirectDelivery,
-  type: string,
-  data: unknown,
+  input: RawSendInput,
 ): Promise<Result<DirectSendReport>> {
-  const prepared = await prepare(config, type, data);
+  const prepared = await prepare(config, input);
   if (!prepared.ok) return prepared;
   const { eventId, body, targets } = prepared.value;
 
@@ -287,19 +321,19 @@ async function sendDirect<E extends EventMap>(
 async function enqueue<E extends EventMap>(
   config: WebhooksConfig<E>,
   delivery: OutboxDelivery<never>,
-  type: string,
-  data: unknown,
+  input: RawSendInput,
   tx: unknown,
 ): Promise<Result<EnqueueReport>> {
-  const prepared = await prepare(config, type, data);
+  const prepared = await prepare(config, input);
   if (!prepared.ok) return prepared;
-  const { eventId, body, targets } = prepared.value;
+  const { eventId, subject, body, targets } = prepared.value;
 
   const now = new Date();
   const rows: OutboxRow[] = targets.map((target) => ({
     id: `obx_${crypto.randomUUID()}`,
     eventId,
-    type,
+    type: input.type,
+    subject,
     body,
     url: target.url,
     secret: target.secret,

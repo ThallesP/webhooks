@@ -97,6 +97,7 @@ export type Jsonify<T> = [unknown] extends [T]
 export type EventUnion<E extends EventMap> = {
   [K in keyof E]: {
     type: K & string;
+    subject: string | null;
     data: Jsonify<StandardSchemaV1.InferOutput<E[K]>>;
   };
 }[keyof E];
@@ -109,5 +110,6 @@ export interface Endpoint {
 
 export type EndpointResolver = (event: {
   type: string;
+  subject: string | null;
   data: unknown;
 }) => Endpoint[] | Promise<Endpoint[]>;
