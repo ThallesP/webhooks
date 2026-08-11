@@ -108,7 +108,7 @@ describe("outbox delivery", () => {
     }) as unknown as typeof fetch;
     await wh.worker({ fetchImpl }).tick();
 
-    const { createVerifier } = await import("@webhooks/verify");
+    const { createVerifier } = await import("@thallesp/webhooks-verify");
     const verified = await createVerifier("s3cret").verifyPayload(
       captured!.body,
       captured!.headers,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { createVerifier } from "@webhooks/verify";
+import { createVerifier } from "@thallesp/webhooks-verify";
 import { direct, webhooks } from "../src/index";
 
 const events = {

@@ -1,5 +1,5 @@
 {
-  "name": "@webhooks/sdk",
+  "name": "@thallesp/webhooks",
   "version": "0.1.0",
   "description": "Type-safe webhook sender: Standard Webhooks signing, direct or transactional-outbox delivery, subject-scoped events",
   "type": "module",
@@ -20,12 +20,20 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "sideEffects": false,
   "engines": {
     "node": ">=20"
   },
-  "keywords": ["webhooks", "outbox", "standard-webhooks", "hmac", "typescript"],
+  "keywords": [
+    "webhooks",
+    "outbox",
+    "standard-webhooks",
+    "hmac",
+    "typescript"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --clean"
   },
@@ -33,6 +41,6 @@
     "access": "public"
   },
   "devDependencies": {
-    "@webhooks/verify": "workspace:*"
+    "@thallesp/webhooks-verify": "workspace:*"
   }
 }

@@ -1,12 +1,12 @@
-# @webhooks/verify
+# @thallesp/webhooks-verify
 
 Zero-dependency webhook signature verification. WebCrypto only — Node 20+, Bun,
 Deno, Cloudflare Workers, edge. Verifies [Standard Webhooks](https://www.standardwebhooks.com/)
 signatures (`svix-*` headers accepted too), so it works with svix-style senders as
-well as [`@webhooks/sdk`](https://www.npmjs.com/package/@webhooks/sdk).
+well as [`@thallesp/webhooks`](https://www.npmjs.com/package/@thallesp/webhooks).
 
 ```ts
-import { createVerifier } from "@webhooks/verify";
+import { createVerifier } from "@thallesp/webhooks-verify";
 
 const verifier = createVerifier(process.env.WEBHOOK_SECRET!);
 

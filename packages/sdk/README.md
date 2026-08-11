@@ -1,4 +1,4 @@
-# @webhooks/sdk
+# @thallesp/webhooks
 
 Type-safe webhook sender. Standard Webhooks wire format, two delivery modes behind
 one `send()` API:
@@ -28,6 +28,6 @@ wh.worker().start();
 ```
 
 `with(tx)` / `worker()` exist on the type only when delivery is `outbox(...)`.
-Consumers verify with the zero-dependency [`@webhooks/verify`](https://www.npmjs.com/package/@webhooks/verify).
+Consumers verify with the zero-dependency [`@thallesp/webhooks-verify`](https://www.npmjs.com/package/@thallesp/webhooks-verify).
 
 Full docs: https://github.com/ThallesP/webhooks

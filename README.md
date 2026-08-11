@@ -4,18 +4,18 @@ Two packages:
 
 | Package | For | Notes |
 | --- | --- | --- |
-| `@webhooks/sdk` | Producers — define events, send webhooks | direct or outbox delivery |
-| `@webhooks/verify` | Consumers — verify incoming webhooks | zero deps, WebCrypto, runs anywhere |
+| `@thallesp/webhooks` | Producers — define events, send webhooks | direct or outbox delivery |
+| `@thallesp/webhooks-verify` | Consumers — verify incoming webhooks | zero deps, WebCrypto, runs anywhere |
 
 Wire format is [Standard Webhooks](https://www.standardwebhooks.com/): HMAC-SHA256 over
 `{id}.{timestamp}.{body}`, sent as `webhook-id` / `webhook-timestamp` / `webhook-signature`
-headers. `@webhooks/verify` also accepts `svix-*` header names, so it verifies svix-style
+headers. `@thallesp/webhooks-verify` also accepts `svix-*` header names, so it verifies svix-style
 senders too.
 
 ## Sending
 
 ```ts
-import { webhooks, direct } from "@webhooks/sdk";
+import { webhooks, direct } from "@thallesp/webhooks";
 import { z } from "zod"; // any Standard Schema library works (zod v4, valibot, arktype)
 
 const events = {
@@ -73,7 +73,7 @@ to wherever the endpoint chooses to redirect).
 ## Outbox mode
 
 ```ts
-import { webhooks, outbox } from "@webhooks/sdk";
+import { webhooks, outbox } from "@thallesp/webhooks";
 
 const wh = webhooks({
   events,
@@ -162,11 +162,11 @@ returning *;
 
 ## Verifying (end clients)
 
-`@webhooks/verify` is the piece you hand to consumers: zero dependencies, WebCrypto only —
+`@thallesp/webhooks-verify` is the piece you hand to consumers: zero dependencies, WebCrypto only —
 Node 20+, Bun, Deno, Cloudflare Workers, edge. (Stock Node 18 lacks global WebCrypto.)
 
 ```ts
-import { createVerifier } from "@webhooks/verify";
+import { createVerifier } from "@thallesp/webhooks-verify";
 
 const verifier = createVerifier(process.env.WEBHOOK_SECRET!);
 
