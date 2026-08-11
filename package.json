@@ -4,11 +4,13 @@
   "type": "module",
   "workspaces": ["packages/*"],
   "scripts": {
+    "build": "bun run --cwd packages/verify build && bun run --cwd packages/sdk build",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bun run build && tsc --noEmit"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.7.0",
     "zod": "^4.0.0"
   }

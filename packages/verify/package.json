@@ -1,8 +1,35 @@
 {
   "name": "@webhooks/verify",
   "version": "0.1.0",
+  "description": "Zero-dependency webhook signature verification (Standard Webhooks / svix compatible) — WebCrypto, runs on Node 20+, Bun, Deno, Workers, edge",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThallesP/webhooks.git",
+    "directory": "packages/verify"
+  },
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": ["webhooks", "verify", "signature", "standard-webhooks", "svix", "hmac"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

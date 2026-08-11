@@ -1,9 +1,36 @@
 {
   "name": "@webhooks/sdk",
   "version": "0.1.0",
+  "description": "Type-safe webhook sender: Standard Webhooks signing, direct or transactional-outbox delivery, subject-scoped events",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThallesP/webhooks.git",
+    "directory": "packages/sdk"
+  },
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": ["webhooks", "outbox", "standard-webhooks", "hmac", "typescript"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "@webhooks/verify": "workspace:*"
