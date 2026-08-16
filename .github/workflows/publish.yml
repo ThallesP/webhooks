@@ -34,6 +34,7 @@ jobs:
             packages/sdk/package.json > pkg.tmp && mv pkg.tmp packages/sdk/package.json
       - name: Publish packages with unpublished versions
         run: |
+          echo "npm $(npm --version), OIDC env: ${ACTIONS_ID_TOKEN_REQUEST_URL:+present}${ACTIONS_ID_TOKEN_REQUEST_URL:-missing}"
           for dir in packages/verify packages/sdk; do
             name=$(jq -r .name "$dir/package.json")
             version=$(jq -r .version "$dir/package.json")
