@@ -35,13 +35,16 @@ jobs:
       - name: Publish packages with unpublished versions
         run: |
           echo "npm $(npm --version), OIDC env: ${ACTIONS_ID_TOKEN_REQUEST_URL:+present}${ACTIONS_ID_TOKEN_REQUEST_URL:-missing}"
-          for dir in packages/verify packages/sdk; do
+          failed=0
+          for dir in packages/sdk packages/verify; do
             name=$(jq -r .name "$dir/package.json")
             version=$(jq -r .version "$dir/package.json")
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version already on npm, skipping"
             else
               echo "Publishing $name@$version"
-              (cd "$dir" && npm publish --access public)
+              # keep going so every package's publish gets attempted
+              (cd "$dir" && npm publish --access public) || { echo "FAILED: $name@$version"; failed=1; }
             fi
           done
+          exit "$failed"
