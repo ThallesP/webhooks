@@ -178,7 +178,7 @@ async function importKey(secret: string): Promise<CryptoKey> {
   );
 }
 
-function secretBytes(secret: string): Uint8Array {
+function secretBytes(secret: string): Uint8Array<ArrayBuffer> {
   if (secret.startsWith("whsec_")) {
     const decoded = base64Decode(secret.slice("whsec_".length));
     if (decoded && decoded.length > 0) return decoded;
@@ -186,7 +186,9 @@ function secretBytes(secret: string): Uint8Array {
   return encoder.encode(secret);
 }
 
-function base64Decode(input: string): Uint8Array | null {
+// Explicit <ArrayBuffer>: newer @types/node WebCrypto signatures reject
+// ArrayBufferLike-backed views as BufferSource.
+function base64Decode(input: string): Uint8Array<ArrayBuffer> | null {
   if (input.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(input)) return null;
   const binary = atob(input);
   const bytes = new Uint8Array(binary.length);

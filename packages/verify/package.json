@@ -1,7 +1,7 @@
 {
   "name": "@thallesp/webhooks-verify",
-  "version": "0.1.1",
-  "description": "Zero-dependency webhook signature verification (Standard Webhooks / svix compatible) \u2014 WebCrypto, runs on Node 20+, Bun, Deno, Workers, edge",
+  "version": "0.1.2",
+  "description": "Zero-dependency webhook signature verification (Standard Webhooks / svix compatible) — WebCrypto, runs on Node 20+, Bun, Deno, Workers, edge",
   "type": "module",
   "license": "MIT",
   "repository": {
