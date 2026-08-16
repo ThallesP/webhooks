@@ -108,8 +108,19 @@ export interface Subscriber {
   secret?: string;
 }
 
-export type SubscriberResolver = (event: {
-  event: string;
-  subject: string | null;
-  data: unknown;
-}) => Subscriber[] | Promise<Subscriber[]>;
+/**
+ * What the subscriber resolver receives, discriminated on `event`. Unlike
+ * EventUnion this is the validator OUTPUT before the JSON round-trip — a
+ * z.date() field is still a Date here.
+ */
+export type ResolverEvent<E extends EventMap> = {
+  [K in keyof E]: {
+    event: K & string;
+    subject: string | null;
+    data: StandardSchemaV1.InferOutput<E[K]>;
+  };
+}[keyof E];
+
+export type SubscriberResolver<E extends EventMap = EventMap> = (
+  event: ResolverEvent<E>,
+) => Subscriber[] | Promise<Subscriber[]>;

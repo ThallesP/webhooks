@@ -17,6 +17,7 @@ export type {
   EventMap,
   EventUnion,
   Jsonify,
+  ResolverEvent,
   Result,
   StandardSchemaV1,
   Subscriber,
@@ -98,7 +99,7 @@ export function outbox<Tx>(
 export interface WebhooksConfig<E extends EventMap> {
   events: E;
   /** Who receives events — a resolver (usually a DB lookup) or a static list. */
-  subscribers: Subscriber[] | SubscriberResolver;
+  subscribers: Subscriber[] | SubscriberResolver<E>;
   /** Default signing secret for subscribers that don't carry their own. */
   signing?: { secret: string };
   /** Subject is mandatory by default; "optional" relaxes it (single-tenant setups). */
@@ -265,10 +266,13 @@ async function prepare<E extends EventMap>(
   const eventId = `evt_${crypto.randomUUID()}`;
 
   const subscribers = config.subscribers;
+  // Erase the resolver's event-map generic: data was just validated against
+  // events[event], so the erased call is safe even though TS can't correlate
+  // the RawSendInput strings with E here.
   const resolved = Array.isArray(subscribers)
     ? ok(subscribers)
     : await toResult(
-        () => subscribers({ event, subject, data: outcome.value }),
+        () => (subscribers as unknown as SubscriberResolver)({ event, subject, data: outcome.value }),
         (cause) => `subscriber resolver failed: ${String(cause)}`,
       );
   if (!resolved.ok) return resolved;

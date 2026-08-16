@@ -122,6 +122,38 @@ export function noAdapterTxWidening() {
   return widened;
 }
 
+export function subscriberResolverIsDiscriminated() {
+  return webhooks({
+    events,
+    signing: { secret: "s" },
+    subscribers: (evt) => {
+      if (evt.event === "invoice.paid") {
+        const id: string = evt.data.invoiceId;
+        // @ts-expect-error user.created fields don't exist under invoice.paid
+        evt.data.userId;
+        return [{ url: `https://x/${id}` }];
+      }
+      const uid: string = evt.data.userId;
+      return [{ url: `https://x/${uid}` }];
+    },
+  });
+}
+
+export function resolverSeesValidatorOutputNotWire() {
+  const dateEvents = { "thing.happened": z.object({ at: z.date() }) };
+  return webhooks({
+    events: dateEvents,
+    signing: { secret: "s" },
+    subscribers: (evt) => {
+      // Resolver runs before JSON.stringify — z.date() is still a Date here.
+      const at: Date = evt.data.at;
+      // @ts-expect-error not yet the wire string form
+      const s: string = evt.data.at;
+      return [{ url: String(at ?? s) }];
+    },
+  });
+}
+
 export function eventUnionReflectsJsonWire() {
   const dateEvents = {
     "thing.happened": z.object({ at: z.date() }),

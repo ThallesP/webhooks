@@ -1,0 +1,46 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm trusted publishing (OIDC)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Trusted publishing needs npm >= 11.5.1
+      - run: npm install -g npm@latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      # npm can't publish workspace:* protocol deps, and bun publish/pack
+      # resolves them from a possibly-stale lockfile — pin the real version
+      # in the manifest here (CI-only edit, never committed).
+      - name: Pin workspace dependency versions
+        run: |
+          verify_version=$(jq -r .version packages/verify/package.json)
+          jq --arg v "$verify_version" \
+            '.devDependencies["@thallesp/webhooks-verify"] = $v' \
+            packages/sdk/package.json > pkg.tmp && mv pkg.tmp packages/sdk/package.json
+      - name: Publish packages with unpublished versions
+        run: |
+          for dir in packages/verify packages/sdk; do
+            name=$(jq -r .name "$dir/package.json")
+            version=$(jq -r .version "$dir/package.json")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version already on npm, skipping"
+            else
+              echo "Publishing $name@$version"
+              (cd "$dir" && npm publish --access public)
+            fi
+          done

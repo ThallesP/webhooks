@@ -1,6 +1,6 @@
 {
   "name": "@thallesp/webhooks",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Type-safe webhook sender: Standard Webhooks signing, direct or transactional-outbox delivery, subject-scoped events",
   "type": "module",
   "license": "MIT",

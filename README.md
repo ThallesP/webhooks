@@ -26,7 +26,9 @@ const events = {
 const wh = webhooks({
   events,
   // usually a resolver — look subscribers up per event (a static
-  // Subscriber[] also works for single-endpoint/internal setups)
+  // Subscriber[] also works for single-endpoint/internal setups).
+  // The payload is a discriminated union on `event`: narrowing it
+  // narrows `data` to that event's schema output.
   subscribers: async ({ event, subject }) =>
     db.select({ url: subs.url, secret: subs.secret })
       .from(subs)
